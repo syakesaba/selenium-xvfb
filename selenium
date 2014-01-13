@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# encoding: utf-8
+
+[ `id -u` != 0 ] && echo "Run as root !" && exit -5
+
+DAEMON_USER=root
+DAEMON_GROUP=root
+UEXEC="sudo -u $DAEMON_USER sh -c "
+UOWNMOD="sudo chown -R $DAEMON_USER:$DAEMON_GROUP"
+
+ #running as root may be dangerous if web browser has vulnerabilities.
+PROGNAME=`basename $0`
+
+PREFIX=/var
+SELE_RUN_DIR=$PREFIX/run/selenium
+mkdir -p $SELE_RUN_DIR
+$UOWNMOD $SELE_RUN_DIR
+SELE_LOG_DIR=$PREFIX/log/selenium
+mkdir -p $SELE_LOG_DIR
+$UOWNMOD $SELE_LOG_DIR
+XVFB_RUN_DIR=$PREFIX/run/xvfb
+mkdir -p $XVFB_RUN_DIR
+$UOWNMOD $XVFB_RUN_DIR
+XVFB_LOG_DIR=$PREFIX/log/xvfb
+mkdir -p $XVFB_LOG_DIR
+$UOWNMOD $XVFB_LOG_DIR
+
+SELENIUM_PIDFILE=$SELE_RUN_DIR/selenium.pid
+XVFB_PIDFILE=$XVFB_RUN_DIR/xvfb.pid
+SELENIUM_LOGFILE=$SELE_LOG_DIR/selenium.log
+XVFB_LOGFILE=$XVFB_LOG_DIR/xvfb.log
+
+XSERVERNUM=0
+
+
+# CHANGE THIS
+#SELENIUM_JARPATH=/usr/local/java/selenium-server-standalone-2.33.0.jar
+#SELENIUM_JARPATH=/usr/local/java/selenium-server-standalone-2.35.0.jar
+SELENIUM_JARPATH=/usr/local/java/selenium-server-standalone-2.39.0.jar
+
+prog="selenium"
+RETVAL=0
+
+start() {
+echo "Starting $prog ..."
+if [ -e "$SELENIUM_PIDFILE" -o -e "$XVFB_PIDFILE" ]; then
+    echo "Already running!"
+    echo "try:  $PROGNAME kill "
+    RETVAL=1
+fi
+_log_flush
+NOW=`date`
+
+$UEXEC "echo \"$NOW\" >> $XVFB_LOGFILE" &&\
+$UEXEC "Xvfb :$XSERVERNUM -screen 0 1024x768x8 -nolisten tcp >> \"$XVFB_LOGFILE\" 2>&1 & echo \$!" >"$XVFB_PIDFILE" &&\
+$UEXEC "echo \"$NOW\" >> $SELENIUM_LOGFILE" &&\
+$UEXEC "DISPLAY=:$XSERVERNUM java -jar $SELENIUM_JARPATH >> \"$SELENIUM_LOGFILE\" 2>&1 & echo \$!" >"$SELENIUM_PIDFILE" &&\
+return
+RETVAL=1
+}
+
+stop() {
+echo "Stopping $prog ..."
+if [ -e "$SELENIUM_PIDFILE" -a -e "$XVFB_PIDFILE" ]; then
+    kill `cat $SELENIUM_PIDFILE` &&\
+    kill `cat $XVFB_PIDFILE` &&\
+    rm -f $SELENIUM_PIDFILE &&\
+    rm -f $XVFB_PIDFILE &&\
+    return
+fi
+RETVAL=1
+}
+
+killer(){
+echo "Killing $prog ..."
+killall firefox
+killall opera
+killall chromium
+killall phantomjs
+killall chromedriver
+#killall IE #(how?)
+killall safari
+rm -f $SELENIUM_PIDFILE
+rm -f $XVFB_PIDFILE
+killall Xvfb
+killall java
+}
+
+show_log(){
+    echo "----------------------selenium" &&\
+    cat $SELENIUM_LOGFILE &&\
+    echo "----------------------xvfb" &&\
+    cat $XVFB_LOGFILE &&\
+    return
+    RETVAL=1
+}
+
+_log_flush(){
+    $UEXEC echo "" > "$SELENIUM_LOGFILE"
+    $UEXEC echo "" > "$XVFB_LOGFILE"
+}
+
+usage() {
+echo "Usage: $PROGNAME {start|stop|restart|log|kill}"
+}
+
+case $1 in
+    start)
+        start
+        echo "sleeping 1 second..."
+        sleep 1
+        ps u -p `cat $XVFB_PIDFILE`
+        ps u -p `cat $SELENIUM_PIDFILE`
+    ;;
+    stop)
+        stop
+        echo "sleeping 1 second..."
+        sleep 1
+    ;;
+    restart)
+        stop
+        echo "sleeping 1 second..."
+        sleep 1
+        start
+        echo "sleeping 1 second..."
+        sleep 1
+    ;;
+    log)
+        show_log
+    ;;
+    kill)
+        killer
+    ;;
+    reset)
+        stop
+        echo "sleeping 1 second..."
+        sleep 1
+        killer
+        echo "sleeping 1 second..."
+        sleep 1
+        start
+        echo "sleeping 1 second..."
+        sleep 1
+    ;;
+    *)
+        usage
+        RETVAL=255
+    ;;
+esac
+exit $RETVAL
